@@ -5,11 +5,22 @@ import * as dotenv from 'dotenv';
 
 dotenv.config();
 
-const BASE_URL = process.env.WC_URL!;
-const KEY = process.env.WC_CONSUMER_KEY!;
-const SECRET = process.env.WC_CONSUMER_SECRET!;
-const PER_PAGE = 100;
+const BASE_URL   = process.env.WC_URL!;
+const KEY        = process.env.WC_CONSUMER_KEY!;
+const SECRET     = process.env.WC_CONSUMER_SECRET!;
+const PER_PAGE   = 100;
 const OUTPUT_PATH = path.resolve('data/products_full.json');
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+function cleanRaw(product: any): any {
+  return {
+    ...product,
+    // Убираем trailing \n которые WordPress добавляет автоматически
+    short_description: (product.short_description ?? '').trimEnd(),
+    description:       (product.description ?? '').trimEnd(),
+  };
+}
 
 async function fetchPage(page: number): Promise<{ products: any[]; total: number }> {
   const response = await axios.get(`${BASE_URL}/wp-json/wc/v3/products`, {
@@ -38,12 +49,12 @@ async function pull() {
     await sleep(400);
   }
 
+  const cleaned = allProducts.map(cleanRaw);
+
   await fs.mkdir('data', { recursive: true });
-  await fs.writeFile(OUTPUT_PATH, JSON.stringify(allProducts, null, 2), 'utf-8');
+  await fs.writeFile(OUTPUT_PATH, JSON.stringify(cleaned, null, 2), 'utf-8');
 
-  console.log(`Done. Saved ${allProducts.length} products to ${OUTPUT_PATH}`);
+  console.log(`Done. Saved ${cleaned.length} products to ${OUTPUT_PATH}`);
 }
-
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 pull().catch(console.error);

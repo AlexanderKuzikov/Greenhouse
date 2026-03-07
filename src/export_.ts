@@ -9,25 +9,24 @@ const CREDENTIALS_PATH = path.resolve(process.env.GOOGLE_CREDENTIALS_PATH!);
 const SPREADSHEET_ID   = process.env.GOOGLE_SPREADSHEET_ID!;
 const INPUT_PATH       = path.resolve('data/products_table.json');
 
-const PRODUCTS_SHEET  = 'Товары';
-const REFERENCE_SHEET = 'Справочник';
+const PRODUCTS_SHEET   = 'Товары';
+const REFERENCE_SHEET  = 'Справочник';
 
 const PRICE_OPTIONS  = ['до 2500 руб.', 'от 2500 до 5000 руб.', 'от 5000 до 7500 руб.', 'свыше 7500 руб.'];
 const SIZE_OPTIONS   = ['Малый', 'Средний', 'Большой', 'Гигантский'];
 const EVENT_OPTIONS  = ['', 'Свадебный букет', '1 Сентября', 'Букет для мамы', 'Тюльпаны 8 Марта'];
 const TYPE_OPTIONS   = ['', 'Букеты из роз'];
 const STATUS_OPTIONS = ['publish', 'draft'];
-const BADGE_OPTIONS  = ['', 'Новинка'];
 
 const HEADERS = [
-  'id', 'sku', 'name_line1', 'name_line2', 'short_description',
-  'regular_price', 'category_price', 'category_size', 'category_event', 'category_type',
-  'badge', 'date_created', 'status', 'permalink', 'image_url', 'slug',
+  'id', 'sku', 'slug', 'permalink', 'image_url', 'image_file',
+  'name_line1', 'name_line2',
+  'description', 'short_description',
+  'regular_price', 'status', 'date_created',
+  'category_price', 'category_size', 'category_event', 'category_type', 'is_new',
 ];
 
-// Колонки только для чтения (не contiguous — защищаем отдельными блоками)
-// id: index 0
-// permalink, image_url, slug: последние 3
+const READONLY_COLS = ['id', 'sku', 'slug', 'permalink', 'image_url', 'image_file'];
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -50,10 +49,16 @@ async function ensureSheets(sheets: any) {
       requests.push({ addSheet: { properties: { title } } });
     }
   }
+
   if (requests.length > 0) {
-    await sheets.spreadsheets.batchUpdate({ spreadsheetId: SPREADSHEET_ID, requestBody: { requests } });
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: { requests },
+    });
     console.log(`Created sheets: ${requests.map(r => r.addSheet.properties.title).join(', ')}`);
   }
+
+  return meta.data.sheets;
 }
 
 async function getSheetId(sheets: any, title: string): Promise<number> {
@@ -63,12 +68,9 @@ async function getSheetId(sheets: any, title: string): Promise<number> {
 }
 
 async function writeReferenceSheet(sheets: any) {
-  const maxLen = Math.max(
-    PRICE_OPTIONS.length, SIZE_OPTIONS.length, EVENT_OPTIONS.length,
-    TYPE_OPTIONS.length, STATUS_OPTIONS.length, BADGE_OPTIONS.length,
-  );
+  const maxLen = Math.max(PRICE_OPTIONS.length, SIZE_OPTIONS.length, EVENT_OPTIONS.length, TYPE_OPTIONS.length, STATUS_OPTIONS.length);
   const rows: string[][] = [
-    ['category_price', 'category_size', 'category_event', 'category_type', 'status', 'badge'],
+    ['category_price', 'category_size', 'category_event', 'category_type', 'status'],
   ];
   for (let i = 0; i < maxLen; i++) {
     rows.push([
@@ -77,7 +79,6 @@ async function writeReferenceSheet(sheets: any) {
       EVENT_OPTIONS[i]  ?? '',
       TYPE_OPTIONS[i]   ?? '',
       STATUS_OPTIONS[i] ?? '',
-      BADGE_OPTIONS[i]  ?? '',
     ]);
   }
 
@@ -85,12 +86,14 @@ async function writeReferenceSheet(sheets: any) {
     spreadsheetId: SPREADSHEET_ID,
     range: `${REFERENCE_SHEET}!A1:Z1000`,
   });
+
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
     range: `${REFERENCE_SHEET}!A1`,
     valueInputOption: 'RAW',
     requestBody: { values: rows },
   });
+
   console.log('Reference sheet updated.');
 }
 
@@ -99,6 +102,7 @@ async function writeProductsSheet(sheets: any, products: any[]) {
 
   for (const p of products) {
     rows.push(HEADERS.map(h => {
+      if (h === 'is_new') return p[h] ? 'TRUE' : 'FALSE';
       if (h === 'image_url') return `=IMAGE("${p[h]}")`;
       return p[h] ?? '';
     }));
@@ -108,21 +112,25 @@ async function writeProductsSheet(sheets: any, products: any[]) {
     spreadsheetId: SPREADSHEET_ID,
     range: `${PRODUCTS_SHEET}!A1:Z10000`,
   });
+
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
     range: `${PRODUCTS_SHEET}!A1`,
     valueInputOption: 'USER_ENTERED',
     requestBody: { values: rows },
   });
+
   console.log(`Written ${products.length} products to sheet.`);
 }
 
 async function applyFormatting(sheets: any, productCount: number) {
   const sheetId = await getSheetId(sheets, PRODUCTS_SHEET);
+  const refId   = await getSheetId(sheets, REFERENCE_SHEET);
   const lastRow = productCount + 1;
+
   const colIndex = (name: string) => HEADERS.indexOf(name);
 
-  const refDropdown = (col: string, refCol: number, optionCount: number) => ({
+  const dropdownRequest = (col: string, refCol: number, optionCount: number) => ({
     setDataValidation: {
       range: {
         sheetId,
@@ -132,27 +140,13 @@ async function applyFormatting(sheets: any, productCount: number) {
       rule: {
         condition: {
           type: 'ONE_OF_RANGE',
-          values: [{
-            userEnteredValue: `=${REFERENCE_SHEET}!${String.fromCharCode(65 + refCol)}2:${String.fromCharCode(65 + refCol)}${optionCount + 1}`,
-          }],
+          values: [{ userEnteredValue: `=${REFERENCE_SHEET}!${String.fromCharCode(65 + refCol)}2:${String.fromCharCode(65 + refCol)}${optionCount + 1}` }],
         },
         showCustomUi: true,
         strict: true,
       },
     },
   });
-
-  const protectRange = (startCol: number, endCol: number, desc: string) => ({
-    addProtectedRange: {
-      protectedRange: {
-        range: { sheetId, startRowIndex: 1, endRowIndex: lastRow, startColumnIndex: startCol, endColumnIndex: endCol },
-        description: desc,
-        warningOnly: true,
-      },
-    },
-  });
-
-  const permalinkIdx = colIndex('permalink'); // 13
 
   const requests: any[] = [
     // Закрепить первую строку
@@ -162,31 +156,49 @@ async function applyFormatting(sheets: any, productCount: number) {
         fields: 'gridProperties.frozenRowCount',
       },
     },
-    // Скрыть колонку image_url
+    // Высота строк для изображений
+    {
+      updateDimensionProperties: {
+        range: { sheetId, dimension: 'ROWS', startIndex: 1, endIndex: lastRow },
+        properties: { pixelSize: 80 },
+        fields: 'pixelSize',
+      },
+    },
+    // Ширина колонки image_url
     {
       updateDimensionProperties: {
         range: { sheetId, dimension: 'COLUMNS', startIndex: colIndex('image_url'), endIndex: colIndex('image_url') + 1 },
-        properties: { hiddenByUser: true },
-        fields: 'hiddenByUser',
+        properties: { pixelSize: 100 },
+        fields: 'pixelSize',
       },
     },
-    // Dropdown-валидации (refCol = индекс колонки в Справочнике)
-    refDropdown('category_price', 0, PRICE_OPTIONS.length),
-    refDropdown('category_size',  1, SIZE_OPTIONS.length),
-    refDropdown('category_event', 2, EVENT_OPTIONS.length),
-    refDropdown('category_type',  3, TYPE_OPTIONS.length),
-    refDropdown('status',         4, STATUS_OPTIONS.length),
-    refDropdown('badge',          5, BADGE_OPTIONS.length),
-    // Защита: id (col 0)
-    protectRange(0, 1, 'Read-only: id'),
-    // Защита: permalink, image_url, slug (последние 3)
-    protectRange(permalinkIdx, permalinkIdx + 3, 'Read-only: permalink, image_url, slug'),
+    // Dropdown-валидация
+    dropdownRequest('category_price', 0, PRICE_OPTIONS.length),
+    dropdownRequest('category_size',  1, SIZE_OPTIONS.length),
+    dropdownRequest('category_event', 2, EVENT_OPTIONS.length),
+    dropdownRequest('category_type',  3, TYPE_OPTIONS.length),
+    dropdownRequest('status',         4, STATUS_OPTIONS.length),
+    // Защита read-only колонок
+    {
+      addProtectedRange: {
+        protectedRange: {
+          range: {
+            sheetId,
+            startRowIndex: 0, endRowIndex: lastRow,
+            startColumnIndex: 0, endColumnIndex: READONLY_COLS.length,
+          },
+          description: 'Read-only: system fields',
+          warningOnly: true,
+        },
+      },
+    },
   ];
 
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId: SPREADSHEET_ID,
     requestBody: { requests },
   });
+
   console.log('Formatting applied.');
 }
 
@@ -197,9 +209,15 @@ async function exportToSheets() {
   console.log('Connecting to Google Sheets...');
   const sheets = await getSheets();
 
-  await ensureSheets(sheets);   await sleep(500);
-  await writeReferenceSheet(sheets); await sleep(500);
-  await writeProductsSheet(sheets, products); await sleep(500);
+  await ensureSheets(sheets);
+  await sleep(500);
+
+  await writeReferenceSheet(sheets);
+  await sleep(500);
+
+  await writeProductsSheet(sheets, products);
+  await sleep(500);
+
   await applyFormatting(sheets, products.length);
 
   console.log(`\nDone. Open your spreadsheet:`);
