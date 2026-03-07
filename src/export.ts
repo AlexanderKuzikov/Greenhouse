@@ -25,10 +25,6 @@ const HEADERS = [
   'badge', 'date_created', 'status', 'permalink', 'image_url', 'slug',
 ];
 
-// Колонки только для чтения (не contiguous — защищаем отдельными блоками)
-// id: index 0
-// permalink, image_url, slug: последние 3
-
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function getSheets() {
@@ -100,6 +96,7 @@ async function writeProductsSheet(sheets: any, products: any[]) {
   for (const p of products) {
     rows.push(HEADERS.map(h => {
       if (h === 'image_url') return `=IMAGE("${p[h]}")`;
+      if (h === 'sku')       return `'${p[h]}`;
       return p[h] ?? '';
     }));
   }
@@ -152,17 +149,15 @@ async function applyFormatting(sheets: any, productCount: number) {
     },
   });
 
-  const permalinkIdx = colIndex('permalink'); // 13
+  const permalinkIdx = colIndex('permalink');
 
   const requests: any[] = [
-    // Закрепить первую строку
     {
       updateSheetProperties: {
         properties: { sheetId, gridProperties: { frozenRowCount: 1 } },
         fields: 'gridProperties.frozenRowCount',
       },
     },
-    // Скрыть колонку image_url
     {
       updateDimensionProperties: {
         range: { sheetId, dimension: 'COLUMNS', startIndex: colIndex('image_url'), endIndex: colIndex('image_url') + 1 },
@@ -170,16 +165,13 @@ async function applyFormatting(sheets: any, productCount: number) {
         fields: 'hiddenByUser',
       },
     },
-    // Dropdown-валидации (refCol = индекс колонки в Справочнике)
     refDropdown('category_price', 0, PRICE_OPTIONS.length),
     refDropdown('category_size',  1, SIZE_OPTIONS.length),
     refDropdown('category_event', 2, EVENT_OPTIONS.length),
     refDropdown('category_type',  3, TYPE_OPTIONS.length),
     refDropdown('status',         4, STATUS_OPTIONS.length),
     refDropdown('badge',          5, BADGE_OPTIONS.length),
-    // Защита: id (col 0)
     protectRange(0, 1, 'Read-only: id'),
-    // Защита: permalink, image_url, slug (последние 3)
     protectRange(permalinkIdx, permalinkIdx + 3, 'Read-only: permalink, image_url, slug'),
   ];
 
@@ -197,7 +189,7 @@ async function exportToSheets() {
   console.log('Connecting to Google Sheets...');
   const sheets = await getSheets();
 
-  await ensureSheets(sheets);   await sleep(500);
+  await ensureSheets(sheets);        await sleep(500);
   await writeReferenceSheet(sheets); await sleep(500);
   await writeProductsSheet(sheets, products); await sleep(500);
   await applyFormatting(sheets, products.length);

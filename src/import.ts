@@ -29,7 +29,6 @@ function diffProduct(exported: any, full: any): Record<string, any> | null {
     }
   }
 
-  // Сравниваем категории по набору id
   const exportedIds = exported.categories.map((c: any) => c.id).sort().join(',');
   const fullIds     = (full.categories ?? []).map((c: any) => c.id).sort().join(',');
   if (exportedIds !== fullIds) {
@@ -52,36 +51,33 @@ async function importProducts() {
   for (const p of exported) {
     const original = fullMap.get(p.id);
     if (!original) {
-      console.warn(`  [SKIP] id=${p.id} not found in products_full.json`);
+      console.warn(`[SKIP] id=${p.id} not found in products_full.json`);
       continue;
     }
     const changes = diffProduct(p, original);
     if (changes) {
       toUpdate.push({ id: p.id, changes });
+    } else {
+      console.log(`[SKIP] id=${p.id} — no changes`);
     }
   }
 
   if (toUpdate.length === 0) {
-    console.log('No changes detected. Nothing to update.');
+    console.log('Nothing to update.');
     return;
   }
 
-  console.log(`\nFound ${toUpdate.length} products to update:`);
-  for (const { id, changes } of toUpdate) {
-    console.log(`  id=${id} changed fields: ${Object.keys(changes).join(', ')}`);
-  }
-
-  console.log('\nSending updates...');
+  console.log(`\nSending ${toUpdate.length} updates...`);
   let success = 0;
   let failed  = 0;
 
   for (const { id, changes } of toUpdate) {
     try {
       await api.put(`products/${id}`, changes);
-      console.log(`  [OK] id=${id}`);
+      console.log(`[OK] id=${id} updated fields: ${Object.keys(changes).join(', ')}`);
       success++;
     } catch (err: any) {
-      console.error(`  [FAIL] id=${id}:`, err?.response?.data ?? err.message);
+      console.error(`[FAIL] id=${id}:`, err?.response?.data ?? err.message);
       failed++;
     }
     await sleep(300);

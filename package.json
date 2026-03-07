@@ -4,12 +4,17 @@
   "description": "CLI-инструмент для синхронизации каталога WooCommerce через локальные JSON-снапшоты и таблицы.",
   "type": "commonjs",
   "scripts": {
-    "pull": "ts-node src/pull.ts",
-    "normalize": "ts-node src/normalize.ts",
-    "sync-images": "ts-node src/sync-images.ts",
-    "export": "ts-node src/export.ts",
+    "pull":             "ts-node src/pull.ts",
+    "normalize":        "ts-node src/normalize.ts",
+    "sync-images":      "ts-node src/sync-images.ts",
+    "export":           "ts-node src/export.ts",
     "fetch-categories": "ts-node src/fetch-categories.ts",
-    "denormalize": "ts-node src/denormalize.ts"
+    "denormalize":      "ts-node src/denormalize.ts",
+    "check-diff":       "ts-node src/check-diff.ts",
+    "export-sheets":    "ts-node src/export-sheets.ts",
+    "push-test":        "ts-node src/push-test.ts",
+    "push":             "ts-node src/push.ts",
+    "import-sheets":    "ts-node src/import-sheets.ts"
   },
   "dependencies": {
     "@woocommerce/woocommerce-rest-api": "^1.0.2",

@@ -4,33 +4,74 @@ import * as path from 'path';
 const INPUT_PATH  = path.resolve('data/products_full.json');
 const OUTPUT_PATH = path.resolve('data/products_table.json');
 
-const PRICE_SLUGS = new Set(['do-2500-rub', 'ot-2500-do-5000-rub', 'ot-5000-do-7500-rub', 'svyshe-7500-rub']);
-const SIZE_SLUGS  = new Set(['malyj', 'srednij', 'bolshoj', 'gigantskij']);
-const EVENT_SLUGS = new Set(['svadebnyj-buket', '1-sentjabrja', 'buket-dlja-mamy', 'tjulpany']);
-const TYPE_SLUGS  = new Set(['bukety-iz-roz']);
-const NEW_SLUG    = 'novinka';
+const CATEGORY_PRICE: Record<number, string> = {
+  39: 'до 2500 руб.',
+  40: 'от 2500 до 5000 руб.',
+  41: 'от 5000 до 7500 руб.',
+  43: 'свыше 7500 руб.',
+};
 
-function stripHtml(raw: string): string {
-  return raw
-    .replace(/<br\s*\/?>/gi, ' ')  // <br />, <br/>, <br> → пробел
-    .replace(/<[^>]+>/g, '')        // остальные теги → пусто
-    .replace(/\n/g, '')             // переносы строк → пусто
-    .replace(/,\s*,/g, ',')         // двойные запятые → одна
-    .replace(/,\s*$/g, '')          // хвостовая запятая → пусто
-    .replace(/\s{2,}/g, ' ')        // множественные пробелы → один
-    .trim();
+const CATEGORY_SIZE: Record<number, string> = {
+  23: 'Малый',
+  24: 'Средний',
+  25: 'Большой',
+  26: 'Гигантский',
+};
+
+const CATEGORY_EVENT: Record<number, string> = {
+  51: 'Свадебный букет',
+  44: '1 Сентября',
+  34: 'Букет для мамы',
+  35: 'Тюльпаны 8 Марта',
+};
+
+const CATEGORY_TYPE: Record<number, string> = {
+  32: 'Букеты из роз',
+};
+
+const BADGE: Record<number, string> = {
+  38: 'Новинка',
+};
+
+function decodeEntities(str: string): string {
+  return str
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#8212;/g, '—')
+    .replace(/&#\d+;/g, '')
+    .replace(/&[a-z]+;/g, '');
+}
+
+function stripHtml(str: string): string {
+  return str.replace(/<[^>]+>/g, '');
+}
+
+function cleanText(str: string): string {
+  return decodeEntities(stripHtml(str)).replace(/\s+/g, ' ').trim();
 }
 
 function parseName(raw: string): { name_line1: string; name_line2: string } {
-  const decoded = raw.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').trim();
-  const parts = decoded.split(/<\/?\s*br\s*\/?>/i);
-  return {
-    name_line1: parts[0]?.trim() ?? '',
-    name_line2: parts[1]?.trim() ?? '',
-  };
+  const clean = decodeEntities(raw);
+  const match = clean.match(/^(.*?)\s*<\/br>(.*?)$/s);
+  if (match) {
+    return {
+      name_line1: match[1].trim(),
+      name_line2: match[2].trim(),
+    };
+  }
+  return { name_line1: cleanText(raw), name_line2: '' };
 }
 
-function classifyCategories(categories: Array<{ id: number; name: string; slug: string }>) {
+function parseShortDescription(raw: string): string {
+  const text = cleanText(raw)
+    .replace(/([^\s])(Диаметр)/g, '$1 $2');
+  return text;
+}
+
+function parseCategories(categories: any[]) {
   let category_price = '';
   let category_size  = '';
   let category_event = '';
@@ -38,33 +79,35 @@ function classifyCategories(categories: Array<{ id: number; name: string; slug: 
   let badge          = '';
 
   for (const cat of categories) {
-    if      (cat.slug === NEW_SLUG)       badge          = 'Новинка';
-    else if (PRICE_SLUGS.has(cat.slug))   category_price = cat.name;
-    else if (SIZE_SLUGS.has(cat.slug))    category_size  = cat.name;
-    else if (EVENT_SLUGS.has(cat.slug))   category_event = cat.name;
-    else if (TYPE_SLUGS.has(cat.slug))    category_type  = cat.name;
+    const id = cat.id;
+    if (CATEGORY_PRICE[id])  category_price = CATEGORY_PRICE[id];
+    if (CATEGORY_SIZE[id])   category_size  = CATEGORY_SIZE[id];
+    if (CATEGORY_EVENT[id])  category_event = CATEGORY_EVENT[id];
+    if (CATEGORY_TYPE[id])   category_type  = CATEGORY_TYPE[id];
+    if (BADGE[id])           badge          = BADGE[id];
   }
 
   return { category_price, category_size, category_event, category_type, badge };
 }
 
-function normalizeProduct(raw: any) {
-  const { name_line1, name_line2 } = parseName(raw.name ?? '');
-  const categories = classifyCategories(raw.categories ?? []);
+function normalizeProduct(p: any) {
+  const { name_line1, name_line2 } = parseName(p.name ?? '');
+  const cats = parseCategories(p.categories ?? []);
 
   return {
-    id:                raw.id,
-    sku:               raw.sku,
+    id:                p.id,
+    sku:               p.sku ?? '',
+    slug:              p.slug ?? '',
+    permalink:         p.permalink ?? '',
+    image_url:         p.images?.[0]?.src ?? '',
+    image_file:        p.images?.[0]?.name ?? '',
     name_line1,
     name_line2,
-    short_description: stripHtml(raw.short_description ?? ''),
-    regular_price:     raw.regular_price ?? '',
-    ...categories,
-    date_created:      raw.date_created,
-    status:            raw.status,
-    permalink:         raw.permalink,
-    image_url:         raw.images?.[0]?.src ?? '',
-    slug:              raw.slug,
+    short_description: parseShortDescription(p.short_description ?? ''),
+    regular_price:     Number(p.regular_price) || 0,
+    status:            p.status ?? 'draft',
+    date_created:      p.date_created ?? '',
+    ...cats,
   };
 }
 
@@ -73,10 +116,10 @@ async function normalize() {
   const products = JSON.parse(await fs.readFile(INPUT_PATH, 'utf-8'));
 
   console.log(`Normalizing ${products.length} products...`);
-  const normalized = products.map(normalizeProduct);
+  const table = products.map(normalizeProduct);
 
-  await fs.writeFile(OUTPUT_PATH, JSON.stringify(normalized, null, 2), 'utf-8');
-  console.log(`Done. Saved ${normalized.length} products to ${OUTPUT_PATH}`);
+  await fs.writeFile(OUTPUT_PATH, JSON.stringify(table, null, 2), 'utf-8');
+  console.log(`Done. Saved ${table.length} products to ${OUTPUT_PATH}`);
 }
 
 normalize().catch(console.error);
