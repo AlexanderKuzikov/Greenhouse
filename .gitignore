@@ -39,3 +39,4 @@ dist/
 # Greenhouse: sensitive & generated data
 credentials/
 data/
+/data_
